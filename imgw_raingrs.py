@@ -358,7 +358,7 @@ def imgw_raingrs_data(
     
 # example use
 
-start = datetime(2024, 7, 26, 15, 00)
+start = datetime(2024, 7, 20, 15, 00)
 end = datetime(2024, 7, 27, 15, 00)
 time_delta = timedelta(hours=1)
 
@@ -383,3 +383,6 @@ output = imgw_raingrs_data(start, end, poi_list)
 
 for record in output:
     print(record, end="\n")
+
+# construct coordinates validator
+# based on: https://epsg.io/transform#s_srs=4326&t_srs=2180&x=21.9652750&y=51.4134470
