@@ -24,8 +24,6 @@ INPUT_CRS="EPSG:4326"
 OUTPUT_CRS="EPSG:2180"
 TRANSFORMER=Transformer.from_crs(INPUT_CRS, OUTPUT_CRS)
 
-def transform_epsg(transformer, lattitude, longitude):
-    return transformer.transform(lattitude, longitude)
 
 def parse_metadata(file_path):
     with open(file_path, 'r') as f:
@@ -57,13 +55,14 @@ def load_data(file_path):
     return np.ma.masked_equal(grs_rain_data, metadata['nodata_value'])
 
 
-def file_exists_locally(local_save_path: str): 
+def file_exists(local_save_path: str): 
     if os.path.exists(local_save_path):
         return True
     
     return False
 
 
+# file downloader
 def download_grs_files(start_datetime: datetime, end_datetime: datetime):
 
     def get_single_file(filename: str):
@@ -138,7 +137,7 @@ def download_grs_files(start_datetime: datetime, end_datetime: datetime):
             Path(__file__).parent / "grs_asc", filename)
         
         # check if file already exists in local dir
-        if not file_exists_locally(file_save_path):
+        if not file_exists(file_save_path):
             # does not exist
             # [1] request file from OPER datastore
             response = get_single_file(filename)
@@ -154,7 +153,7 @@ def download_grs_files(start_datetime: datetime, end_datetime: datetime):
                     
                 # check existence again
                 # OPTIONAL
-                if file_exists_locally(file_save_path):
+                if file_exists(file_save_path):
                     filestatus = True
                     print("--exists")
                     # CONTINUE loop
@@ -199,7 +198,7 @@ def download_grs_files(start_datetime: datetime, end_datetime: datetime):
                 print("--tar extracted")
                 
                 # check file existence
-                if file_exists_locally(file_save_path):
+                if file_exists(file_save_path):
                     print("--exists")
                     filestatus=True
                 else:
@@ -232,7 +231,7 @@ def download_grs_files(start_datetime: datetime, end_datetime: datetime):
                         print("--tar extracted")
                         
                         # check file existence
-                        if file_exists_locally(file_save_path):
+                        if file_exists(file_save_path):
                             print("--exists")
                             filestatus=True
             
@@ -254,123 +253,133 @@ def download_grs_files(start_datetime: datetime, end_datetime: datetime):
     return checklist    
 
 
-def get_grs_value(start_datetime, end_datetime, *args):
+def grs_value(start_datetime, end_datetime, points_list):
     
     current_datetime = start_datetime
     
     output = []
     
     while current_datetime <= end_datetime:
-        
-        # load file 
+         
         filename = f"{current_datetime.strftime("%Y%m%d%H%M")}_acc0060_grs.asc"
-        
         file_save_path = os.path.join(
             Path(__file__).parent / "grs_asc", filename)
         
-        if file_exists_locally(file_save_path):
+        if file_exists(file_save_path):
             grs = load_data(file_save_path)
             
-            for arg in args:
-                grid_points, grs_value = rainfall_sum_1point(arg[1], arg[0], grs)
+            for point in points_list:
                 
-                output.append([current_datetime, arg[0], arg[1], grid_points, grs_value])
+                grs_pcpn = float(grs[point[0], point[1]])
+                output.append([
+                    current_datetime.strftime("%Y-%m-%d-%H:%M"), 
+                    point[0], point[1], 
+                    point[2], point[3], 
+                    grs_pcpn])
         
         current_datetime += TIME_DELTA_DEFAULT
     
     return output
    
 
-def estimate_grs_grid_point(pointX, pointY):
+def point_to_grs_point(y, x):
     """
     Estimate GRS Grid point based on (X,Y) coordinates in EPSG:2180
     """
-    gridX0 = int(round((pointX - GRS_X_OFF) / GRS_RES))
-    gridY0 = int(round((pointY - GRS_Y_OFF) / GRS_RES))
+    gridX0 = int(round((x - GRS_X_OFF) / GRS_RES))
+    gridY0 = int(round((y - GRS_Y_OFF) / GRS_RES))
 
-    return gridX0, gridY0
+    return gridY0, gridX0
 
-                  
-def rainfall_sum_1point(pointY, pointX, rainGrsData):
-
-    grsGridPoints=[]
-    # estimate 1 coresponding grid point
-    gridX0, gridY0 = estimate_grs_grid_point(pointX, pointY)
-    grsGridPoints.append((gridX0, gridY0))
-
-    grsValue =  float(rainGrsData[gridY0, gridX0])
-
-    return grsGridPoints, grsValue
+                          
+# Transformer functions
+def transform_epsg(transformer, lattitude, longitude):
+    return transformer.transform(lattitude, longitude)
 
 
+# 1 point estimate
+def estimate_1_point(grid_y, grid_x):  
+    return point_to_grs_point(grid_y, grid_x)
 
-def get_imgw_raingrs_data(start_datetime:datetime, end_datetime:datetime, 
-                          points_of_interest):
+
+# 4 point estimate TODO
+def grs_4point(grid_y, grid_x):
+    pass   
+
+
+# MAJOR function
+def imgw_raingrs_data(
+    start_datetime: datetime,
+    end_datetime: datetime,
+    points_of_interest: list
+) -> list:
+    """_summary_
+
+    Args:
+        start_datetime (datetime): _description_
+        end_datetime (datetime): _description_
+        points_of_interest (list): [lattitude, longitude]
+
+    Returns:
+        list: list of lists ["datetime", "grs_x", "grs_y", "lat", "lon", "value"]
+    """
     
-    output = []
+    output = [["datetime", "grs_x", "grs_y", "lat", "lon", "value"]]
     
-    # get files
-    checklist = download_grs_files(start_datetime, end_datetime)   
-       
-    # checklist pritn
-    for key in checklist:
-        print(key, checklist[key], end="\n") 
-        
-    # [2] create records for poi
-    if type(points_of_interest) == type(dict()):
-        print("poi is dict")
-        
-        
-    elif type(points_of_interest) == type(list()):
-        print("poi is list")
+    file_checklist = download_grs_files(start_datetime, end_datetime)
+    
+    if points_of_interest:
         
         for point in points_of_interest:
             
-            lat, lon = point[2], point[1]
+            # longitude, lattitude
+            lat, lon = point[0], point[1]
             
-            # print(point, "id=", point[0], "lon=", point[1], "lat=", point[2], end="\n")
+            # lon, lat -> grid points
+            grid_y, grid_x = transform_epsg(TRANSFORMER, lat, lon)
             
-            # lat long -> grs point
-            cordX, cordY = transform_epsg(TRANSFORMER, lat, lon)
+            # estimate grs grid point (1)
+            grs_grid_y, grs_grid_x = estimate_1_point(grid_y, grid_x)
             
-            # 1 point
-            # calculate grs point X, Y
+            # estimate grs grid points (4)
+            # TODO
             
+            # retrive grs pcpn values
+            output += grs_value(
+                start_datetime, 
+                end_datetime, 
+                [(grs_grid_x, grs_grid_y, lon, lat)])
             
-            # 4 point
-            # calculate 4 grs point X, Y
-            
-            
-            # use that grs to get values
-            output += get_grs_value(start_datetime, end_datetime, (cordX, cordY))
-            
+    else:
+        pass
     
     return output
-        
-
-########################################################################       
+            
+    
 # example use
 
 start = datetime(2024, 7, 26, 15, 00)
 end = datetime(2024, 7, 27, 15, 00)
 time_delta = timedelta(hours=1)
 
-# example lat/long input (point_of_interest)
-poi_dict = {
-    "IUNG1": (21.965275, 51.413447),
-    "IUNG10": (23.492164, 50.803253),
-    "IUNG107": (16.32475, 50.93678),
-    "IUNG108": (15.06074, 51.24185),
-    "IUNG109": (16.33423, 51.56973),
-    "IUNG11": (23.75, 50.7487),
-    "IUNG110": (17.794408, 51.216392),
-}
+# example lon/lat input (point_of_interest)
+# poi_dict = {
+#     "IUNG1": (21.965275, 51.413447),
+#     "IUNG10": (23.492164, 50.803253),
+#     "IUNG107": (16.32475, 50.93678),
+#     "IUNG108": (15.06074, 51.24185),
+#     "IUNG109": (16.33423, 51.56973),
+#     "IUNG11": (23.75, 50.7487),
+#     "IUNG110": (17.794408, 51.216392),
+# }
 poi_list = [
-    ("IUNG1", 21.965275, 51.413447),
-    ("IUNG10", 23.492164, 50.803253),
-    ("IUNG107", 16.32475, 50.93678),
+    (51.413447, 21.965275),
+    (50.803253, 23.492164),
+    (50.93678, 16.32475),
 ]
 
-output = get_imgw_raingrs_data(start, end, poi_list)
+# Final result
+output = imgw_raingrs_data(start, end, poi_list)
 
-print(output)
+for record in output:
+    print(record, end="\n")
